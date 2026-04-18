@@ -394,13 +394,33 @@
             }
             box.appendChild(card);
 
-            if (Array.isArray(a.dimensions) && a.dimensions.length) {
+            const subScores = [];
+            if (a.resume_jd_match && a.resume_jd_match.score != null) {
+                subScores.push({ name: "简历–JD 匹配度", score: a.resume_jd_match.score });
+            }
+            if (a.interview_performance && a.interview_performance.score != null) {
+                const qn = Array.isArray(a.interview_performance.question_reviews)
+                    ? a.interview_performance.question_reviews.length : 0;
+                subScores.push({
+                    name: qn ? `面试问答表现（${qn} 题）` : "面试问答表现",
+                    score: a.interview_performance.score,
+                });
+            }
+            // 兼容老数据：如果返回的是旧版 dimensions 结构，也展示出来
+            if (!subScores.length && Array.isArray(a.dimensions)) {
+                a.dimensions.slice(0, 6).forEach((d) => subScores.push({
+                    name: d.name || "维度",
+                    score: d.score,
+                }));
+            }
+
+            if (subScores.length) {
                 const dimBox = el("div", { class: "dim-grid" });
-                a.dimensions.slice(0, 6).forEach((d) => {
+                subScores.forEach((d) => {
                     const score = clampScore(d.score);
                     const row2 = el("div", { class: "dim-row" }, [
                         el("div", {}, [
-                            el("div", { class: "dim-name" }, d.name || "维度"),
+                            el("div", { class: "dim-name" }, d.name),
                             el("div", { class: "bar", style: `--w:${score}%` }),
                         ]),
                         el("div", { class: "dim-score" }, String(score)),
@@ -494,25 +514,6 @@
         if (a.fit_summary) card.appendChild(el("div", { class: "summary-line" }, a.fit_summary));
         wrap.appendChild(card);
 
-        if (Array.isArray(a.dimensions)) {
-            wrap.appendChild(el("h4", {}, "评分维度"));
-            const list = el("div", { class: "dim-grid" });
-            a.dimensions.forEach((d) => {
-                const score = clampScore(d.score);
-                list.appendChild(el("div", { style: "margin:6px 0;" }, [
-                    el("div", { class: "dim-row" }, [
-                        el("div", {}, [
-                            el("div", { class: "dim-name" }, d.name || "维度"),
-                            el("div", { class: "bar", style: `--w:${score}%` }),
-                        ]),
-                        el("div", { class: "dim-score" }, String(score)),
-                    ]),
-                    el("div", { class: "summary-line" }, d.comment || ""),
-                ]));
-            });
-            wrap.appendChild(list);
-        }
-
         const pushList = (title, arr) => {
             if (!Array.isArray(arr) || !arr.length) return;
             wrap.appendChild(el("h4", {}, title));
@@ -520,15 +521,82 @@
             arr.forEach((x) => ul.appendChild(el("li", {}, String(x))));
             wrap.appendChild(ul);
         };
-        pushList("优势", a.strengths);
-        pushList("不足 / 风险", a.concerns);
-        pushList("建议追问的问题", a.follow_up_questions);
-        pushList("背景核实事项", a.background_check);
 
-        if (a.feedback_to_interviewer) {
-            wrap.appendChild(el("h4", {}, "给面试官的复盘建议"));
-            wrap.appendChild(el("div", { class: "summary-line" }, a.feedback_to_interviewer));
+        const renderScoreBar = (name, score) => {
+            const s = clampScore(score);
+            return el("div", { class: "dim-row", style: "margin:6px 0 4px;" }, [
+                el("div", {}, [
+                    el("div", { class: "dim-name" }, name),
+                    el("div", { class: "bar", style: `--w:${s}%` }),
+                ]),
+                el("div", { class: "dim-score" }, String(s)),
+            ]);
+        };
+
+        // 简历–JD 匹配度
+        const rm = a.resume_jd_match;
+        if (rm && typeof rm === "object") {
+            wrap.appendChild(el("h4", {}, "简历 – JD 匹配度"));
+            wrap.appendChild(renderScoreBar("匹配度评分", rm.score));
+            if (rm.comment) {
+                wrap.appendChild(el("div", { class: "summary-line" }, rm.comment));
+            }
+            pushList("已匹配的要点", rm.matched);
+            pushList("明显的缺口 / 不足", rm.gaps);
         }
+
+        // 面试问答表现
+        const ip = a.interview_performance;
+        if (ip && typeof ip === "object") {
+            wrap.appendChild(el("h4", {}, "面试问答表现"));
+            wrap.appendChild(renderScoreBar("问答整体评分", ip.score));
+            if (ip.comment) {
+                wrap.appendChild(el("div", { class: "summary-line" }, ip.comment));
+            }
+            if (Array.isArray(ip.question_reviews) && ip.question_reviews.length) {
+                const qList = el("div");
+                ip.question_reviews.forEach((q, idx) => {
+                    const qBox = el("div", {
+                        style: "border:1px solid #e5e7eb;border-radius:6px;padding:8px 10px;margin:6px 0;background:#fcfcff;",
+                    }, [
+                        el("div", {
+                            style: "display:flex;justify-content:space-between;gap:8px;align-items:flex-start;",
+                        }, [
+                            el("div", { style: "font-weight:600;font-size:12.5px;flex:1;" },
+                                `Q${idx + 1}. ${q.question || "(问题缺失)"}`),
+                            el("div", { style: "font-weight:600;color:var(--primary);white-space:nowrap;" },
+                                String(clampScore(q.score)) + " 分"),
+                        ]),
+                        q.answer_summary ? el("div", {
+                            style: "margin-top:4px;font-size:12px;color:#475569;",
+                        }, "回答要点：" + q.answer_summary) : null,
+                        q.evaluation ? el("div", {
+                            style: "margin-top:4px;font-size:12px;color:#334155;",
+                        }, "评价：" + q.evaluation) : null,
+                    ]);
+                    qList.appendChild(qBox);
+                });
+                wrap.appendChild(qList);
+            }
+        }
+
+        // 兼容老版本数据
+        if (!rm && !ip && Array.isArray(a.dimensions)) {
+            wrap.appendChild(el("h4", {}, "评分维度（旧格式）"));
+            const list = el("div", { class: "dim-grid" });
+            a.dimensions.forEach((d) => {
+                list.appendChild(el("div", { style: "margin:6px 0;" }, [
+                    renderScoreBar(d.name || "维度", d.score),
+                    el("div", { class: "summary-line" }, d.comment || ""),
+                ]));
+            });
+            wrap.appendChild(list);
+        }
+
+        pushList("优势（基于简历+面试的具体证据）", a.strengths);
+        pushList("不足 / 风险（基于简历+面试的具体证据）", a.concerns);
+        pushList("下一轮建议追问的问题", a.follow_up_questions);
+
         if (a.final_advice) {
             wrap.appendChild(el("h4", {}, "综合建议"));
             wrap.appendChild(el("div", { class: "summary-line" }, a.final_advice));
