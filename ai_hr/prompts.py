@@ -1,6 +1,18 @@
 """AI HR 使用的 prompt 模板。"""
 from __future__ import annotations
 
+# 简历/面试记录往往很长，这里统一做一个软性截断，避免 prompt 过长导致超时或成本飙升。
+MAX_FIELD_CHARS = 12000
+
+
+def _clip(text: str, n: int = MAX_FIELD_CHARS) -> str:
+    if not text:
+        return text
+    if len(text) <= n:
+        return text
+    return text[:n] + f"\n...(超出 {len(text) - n} 字已截断)..."
+
+
 SYSTEM_HR = (
     "你是一位资深的 HR 与技术面试官，擅长根据岗位需求和候选人简历设计针对性、"
     "可量化的面试问题，并能客观、专业地分析面试记录、给出反馈与评分。"
@@ -13,13 +25,13 @@ def build_questions_messages(job_desc: str, resume_text: str, focus_points: str)
     user = f"""请根据以下信息，为这位候选人设计一套结构化的面试提纲。
 
 【岗位需求 / JD】
-{job_desc or '(未填写)'}
+{_clip(job_desc) or '(未填写)'}
 
 【候选人简历】
-{resume_text or '(未提供)'}
+{_clip(resume_text) or '(未提供)'}
 
 【面试官的关注事项】
-{focus_points or '(未填写)'}
+{_clip(focus_points) or '(未填写)'}
 
 请按以下结构输出，使用 Markdown 分级标题与列表：
 1. **简历要点速览**：3-6 条，总结候选人的核心背景与亮点/疑点。
@@ -49,19 +61,19 @@ def build_analysis_messages(
     user = f"""请基于以下材料，对本次面试进行专业分析，并给出结构化评分与建议。
 
 【岗位需求 / JD】
-{job_desc or '(未填写)'}
+{_clip(job_desc) or '(未填写)'}
 
 【候选人简历摘要】
-{resume_text or '(未提供)'}
+{_clip(resume_text) or '(未提供)'}
 
 【面试官的关注事项】
-{focus_points or '(未填写)'}
+{_clip(focus_points) or '(未填写)'}
 
 【事先生成的面试问题与考察事项】
-{interview_questions or '(未提供)'}
+{_clip(interview_questions) or '(未提供)'}
 
 【本次的面试记录 / 纪要】
-{interview_notes or '(未提供)'}
+{_clip(interview_notes) or '(未提供)'}
 
 请严格以 **JSON 对象** 形式返回，不要包含 JSON 以外的任何内容。结构如下：
 {{

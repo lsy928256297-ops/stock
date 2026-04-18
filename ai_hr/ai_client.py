@@ -27,10 +27,12 @@ def chat_completion(
     temperature: float = 0.4,
     max_tokens: int = 2048,
     response_format_json: bool = False,
-    timeout: int = 120,
+    timeout: Optional[int] = None,
 ) -> str:
     """调用 LLM，返回模型输出的字符串内容。"""
     _require_api_key()
+    if timeout is None:
+        timeout = config.API_TIMEOUT
     url = f"{config.API_BASE}/chat/completions"
     headers = {
         "Authorization": f"Bearer {config.API_KEY}",
@@ -46,11 +48,17 @@ def chat_completion(
         payload["response_format"] = {"type": "json_object"}
     try:
         resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+    except requests.Timeout as exc:
+        raise AIClientError(
+            f"调用 LLM 超时（{timeout}s）。可能的原因：\n"
+            "  · 该模型出得慢（Claude Opus 走第三方代理时常见，建议换 sonnet 或 haiku）\n"
+            "  · 提示词过长（尝试缩短 JD / 简历 / 面试记录）\n"
+            f"解决：加长超时时间 → export AI_HR_TIMEOUT=1200 后重启服务，或改 model：\n"
+            f"  当前 model={config.MODEL!r}  api_base={config.API_BASE!r}"
+        ) from exc
     except requests.RequestException as exc:
         raise AIClientError(f"调用 LLM 网络错误: {exc}") from exc
 
-    # 某些代理/模型（例如部分 Claude 走 openai 兼容层）不支持 response_format，
-    # 收到 400/422 时自动去掉该字段再重试一次。
     if response_format_json and resp.status_code in (400, 415, 422):
         err_text = (resp.text or "")[:500].lower()
         if "response_format" in err_text or "unsupported" in err_text or "invalid" in err_text:

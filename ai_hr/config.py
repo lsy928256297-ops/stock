@@ -18,6 +18,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 API_KEY = os.environ.get("AI_HR_API_KEY", "")
 API_BASE = os.environ.get("AI_HR_API_BASE", "https://api.openai.com/v1").rstrip("/")
 MODEL = os.environ.get("AI_HR_MODEL", "gpt-4o-mini")
+# LLM 单次请求超时（秒）。Claude Opus 走第三方代理有时会很慢，默认放到 10 分钟。
+API_TIMEOUT = int(os.environ.get("AI_HR_TIMEOUT", "600"))
 
 UPLOAD_DIR = os.environ.get(
     "AI_HR_UPLOAD_DIR", os.path.join(BASE_DIR, "uploads")

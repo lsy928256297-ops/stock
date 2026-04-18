@@ -99,19 +99,22 @@ def create_app() -> Flask:
         file = request.files["file"]
         if not file or not file.filename:
             return jsonify({"error": "请选择简历文件"}), 400
-        filename = secure_filename(file.filename) or file.filename
-        ext = os.path.splitext(filename)[1].lower().lstrip(".")
+        original_name = file.filename
+        ext = os.path.splitext(original_name)[1].lower().lstrip(".")
         if ext not in config.ALLOWED_EXTENSIONS:
             return jsonify({
                 "error": f"不支持的文件类型 .{ext}；仅支持: {', '.join(sorted(config.ALLOWED_EXTENSIONS))}"
             }), 400
+        safe = secure_filename(original_name) or f"resume.{ext}"
+        if not safe.lower().endswith("." + ext):
+            safe = f"{safe.rstrip('.')}.{ext}" if safe.rstrip(".") else f"resume.{ext}"
+        filename = original_name
         raw = file.read()
         try:
             text = resume_parser.extract_resume_text(filename, raw)
         except (ValueError, RuntimeError) as exc:
             return jsonify({"error": str(exc)}), 400
-        # 存盘（便于追溯）
-        save_name = f"{row_id}_{filename}"
+        save_name = f"{row_id}_{safe}"
         save_path = os.path.join(config.UPLOAD_DIR, save_name)
         try:
             with open(save_path, "wb") as f:
@@ -135,26 +138,29 @@ def create_app() -> Flask:
         for file in files:
             if not file or not file.filename:
                 continue
-            filename = secure_filename(file.filename) or file.filename
-            ext = os.path.splitext(filename)[1].lower().lstrip(".")
+            original_name = file.filename
+            ext = os.path.splitext(original_name)[1].lower().lstrip(".")
             if ext not in config.ALLOWED_EXTENSIONS:
-                errors.append({"file": filename, "error": f"不支持 .{ext}"})
+                errors.append({"file": original_name, "error": f"不支持 .{ext}"})
                 continue
+            safe = secure_filename(original_name) or f"resume.{ext}"
+            if not safe.lower().endswith("." + ext):
+                safe = f"{safe.rstrip('.')}.{ext}" if safe.rstrip(".") else f"resume.{ext}"
             raw = file.read()
             try:
-                text = resume_parser.extract_resume_text(filename, raw)
+                text = resume_parser.extract_resume_text(original_name, raw)
             except (ValueError, RuntimeError) as exc:
-                errors.append({"file": filename, "error": str(exc)})
+                errors.append({"file": original_name, "error": str(exc)})
                 continue
             row = storage.create_row(
                 job_desc=job_desc,
                 focus_points=focus_points,
-                resume_filename=filename,
+                resume_filename=original_name,
                 resume_text=text,
             )
             try:
                 with open(
-                    os.path.join(config.UPLOAD_DIR, f"{row['id']}_{filename}"), "wb"
+                    os.path.join(config.UPLOAD_DIR, f"{row['id']}_{safe}"), "wb"
                 ) as f:
                     f.write(raw)
             except OSError:
@@ -242,6 +248,7 @@ def create_app() -> Flask:
             "api_key_set": bool(config.API_KEY),
             "allowed_ext": sorted(config.ALLOWED_EXTENSIONS),
             "max_mb": config.MAX_CONTENT_MB,
+            "timeout_s": config.API_TIMEOUT,
         })
 
     @app.get("/api/diagnose")
