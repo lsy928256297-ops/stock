@@ -230,11 +230,57 @@ def create_app() -> Flask:
             return jsonify({"error": str(exc)}), 502
         log.info("analyze got response in %.1fs, len=%d", time.time() - t0, len(text or ""))
         parsed = ai_client.extract_json(text)
+
+        # 若首次未能提取到 JSON，做一次"修复式"重试：
+        # 直接把上一次的模型输出塞回去，让模型把它改成纯 JSON。
         if not parsed:
+            log.warning("analyze: first attempt not JSON, retrying with fix-up prompt")
+            repair_messages = [
+                {"role": "system", "content":
+                    "你是一个 JSON 规整器。用户会给你一段可能不是合法 JSON 的文本，"
+                    "你必须把其中的候选人评估信息转成一个 **合法的 JSON 对象**，"
+                    "字段与嵌套结构尽量保留，数字字段保持数字类型，不得用代码块包裹，"
+                    "不得输出 JSON 以外的任何字符。"
+                },
+                {"role": "user", "content":
+                    "下面是一段评估文本，请转成 JSON 对象，要求包含字段："
+                    "overall_score(int), recommendation(str), recommendation_label(str), "
+                    "fit_summary(str), dimensions(array of {name,score,comment}), "
+                    "strengths(array), concerns(array), follow_up_questions(array), "
+                    "background_check(array), feedback_to_interviewer(str), final_advice(str)。\n"
+                    "若某字段原文缺失，自行合理推断并填写。只输出 JSON，不要前后缀。\n\n"
+                    "===原文开始===\n"
+                    f"{text}\n"
+                    "===原文结束==="
+                },
+            ]
+            try:
+                text2 = ai_client.chat_completion(
+                    repair_messages,
+                    temperature=0.0,
+                    max_tokens=3000,
+                    response_format_json=True,
+                )
+                parsed = ai_client.extract_json(text2)
+                if parsed:
+                    text = text2
+                    log.info("analyze: repair attempt succeeded")
+            except ai_client.AIClientError as exc:
+                log.error("analyze repair attempt failed: %s", exc)
+
+        if not parsed:
+            log.error("analyze: unable to extract JSON from response")
             return jsonify({
-                "error": "模型输出不是有效的 JSON，原文已附在 raw 字段",
+                "error": (
+                    "模型返回的不是合法 JSON，已自动尝试修复仍失败。\n"
+                    "可能原因：\n"
+                    "  · 当前模型对 JSON 格式支持一般（换 claude-3.5-sonnet / gpt-4o 会更稳）\n"
+                    "  · 输入过长被截断\n"
+                    "原始返回已附在 raw 字段，可以手动复制查看。"
+                ),
                 "raw": text,
             }), 502
+
         parsed["_raw"] = text
         updated = storage.update_row(row_id, analysis=parsed)
         return jsonify(updated)

@@ -41,13 +41,16 @@
         let data = null;
         try { data = text ? JSON.parse(text) : null; } catch (_) { /* raw text */ }
         if (!res.ok) {
-            const msg =
+            let msg =
                 (data && (data.error || data.message)) ||
                 (text && text.slice(0, 500)) ||
                 `HTTP ${res.status}`;
+            if (data && data.raw) {
+                msg += `\n\n[模型原始输出]\n${String(data.raw).slice(0, 2000)}`;
+            }
             const err = new Error(msg);
             err.status = res.status;
-            err.raw = text;
+            err.raw = data && data.raw;
             throw err;
         }
         return data;

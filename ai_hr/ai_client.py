@@ -141,25 +141,88 @@ def ping() -> Dict:
         return {"ok": False, "stage": "chat", "detail": str(exc)}
 
 
-def extract_json(text: str) -> Optional[Dict]:
-    """从模型输出中提取第一个 JSON 对象。"""
+def _find_balanced_json(text: str) -> Optional[str]:
+    """扫描字符串，找到第一个语义平衡（括号匹配）的 {...} 块。
+    处理字符串字面量、转义、嵌套对象 / 数组。"""
     if not text:
         return None
-    text = text.strip()
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+def _try_loads(s: str) -> Optional[Dict]:
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except json.JSONDecodeError:
-            pass
-    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            return None
+        v = json.loads(s)
+        return v if isinstance(v, dict) else None
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _sanitize_json_like(s: str) -> str:
+    """尽量把常见的 LLM 非法 JSON 修正成合法 JSON。"""
+    out = s
+    # 去掉中文 / 全角尾随逗号  e.g.  ,] ,}
+    out = re.sub(r",\s*([\]}])", r"\1", out)
+    # 把单引号对改成双引号（仅在键/值明显的地方；较激进，仅作为最后兜底）
+    return out
+
+
+def extract_json(text: str) -> Optional[Dict]:
+    """从模型输出中提取第一个 JSON 对象，尽量容错。"""
+    if not text:
+        return None
+    t = text.strip()
+    # 去 BOM、零宽字符
+    t = t.lstrip("\ufeff").replace("\u200b", "")
+
+    # 1) 直接 parse
+    result = _try_loads(t)
+    if result is not None:
+        return result
+
+    # 2) ```json ... ``` 代码块（非贪婪）
+    for m in re.finditer(r"```(?:json|JSON)?\s*(.*?)```", t, flags=re.DOTALL):
+        block = m.group(1).strip()
+        result = _try_loads(block) or _try_loads(_sanitize_json_like(block))
+        if result is not None:
+            return result
+
+    # 3) 第一段平衡括号的 {...}
+    block = _find_balanced_json(t)
+    if block:
+        result = _try_loads(block) or _try_loads(_sanitize_json_like(block))
+        if result is not None:
+            return result
+
+    # 4) 贪婪兜底：从第一个 { 到最后一个 }
+    first, last = t.find("{"), t.rfind("}")
+    if 0 <= first < last:
+        fragment = t[first : last + 1]
+        result = _try_loads(fragment) or _try_loads(_sanitize_json_like(fragment))
+        if result is not None:
+            return result
+
     return None

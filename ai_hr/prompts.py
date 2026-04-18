@@ -19,6 +19,12 @@ SYSTEM_HR = (
     "你的回复必须严谨、务实，避免空话套话，并全程使用中文。"
 )
 
+SYSTEM_HR_JSON = (
+    "你是一位资深的 HR 与技术面试官。你的输出必须是**一个合法的 JSON 对象**，"
+    "不要使用 Markdown 代码块包裹，不要在 JSON 前后加任何解释性文字、前缀、后缀，"
+    "直接以 '{' 开头、以 '}' 结尾。字段内部使用中文。"
+)
+
 
 def build_questions_messages(job_desc: str, resume_text: str, focus_points: str):
     """生成面试问题 + 考察事项 的 prompt。"""
@@ -98,8 +104,14 @@ def build_analysis_messages(
 - overall_score >= 85：强烈推荐；70-84：推荐；55-69：待定；<55：不推荐。
 - dimensions 至少包含 5 个维度；若某维度因记录缺失无法判断，请在 comment 中明确指出"证据不足"。
 - 所有文字字段使用中文。
+
+**输出格式硬性要求**：
+1. 只输出 JSON 对象，不要有任何解释、前言、结尾。
+2. 不要用 ```json ... ``` 代码块包裹。
+3. 整段输出必须以 `{` 开头、以 `}` 结尾。
+4. 字符串里的双引号要转义为 `\\"`；不要使用中文引号。
 """
     return [
-        {"role": "system", "content": SYSTEM_HR},
+        {"role": "system", "content": SYSTEM_HR_JSON},
         {"role": "user", "content": user},
     ]
