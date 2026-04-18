@@ -385,10 +385,18 @@
     }
 
     // ---------- drawer ----------
+    function closeDrawer() {
+        $("#drawer").hidden = true;
+        const bd = $("#drawer-backdrop");
+        if (bd) bd.hidden = true;
+    }
+
     function openDrawer(rowId, focus) {
         const row = state.rows.find((r) => r.id === rowId);
         if (!row) return;
         $("#drawer").hidden = false;
+        const bd = $("#drawer-backdrop");
+        if (bd) bd.hidden = false;
         $("#drawer-title").textContent = `候选人详情 · ${row.resume_filename || row.id.slice(0, 8)}`;
         const body = $("#drawer-body");
         body.innerHTML = "";
@@ -575,8 +583,11 @@
             onBulkUpload(ev.target.files);
             ev.target.value = "";
         });
-        $("#drawer-close").addEventListener("click", () => {
-            $("#drawer").hidden = true;
+        $("#drawer-close").addEventListener("click", closeDrawer);
+        const bd = $("#drawer-backdrop");
+        if (bd) bd.addEventListener("click", closeDrawer);
+        document.addEventListener("keydown", (ev) => {
+            if (ev.key === "Escape" && !$("#drawer").hidden) closeDrawer();
         });
 
         if (!window.AI_HR_META.api_key_set) {

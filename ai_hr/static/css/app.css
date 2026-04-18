@@ -268,6 +268,15 @@ table.grid tbody tr:hover { background: #fbfcff; }
 }
 
 /* Drawer */
+.drawer[hidden] { display: none !important; }
+.drawer-backdrop[hidden] { display: none !important; }
+.drawer-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(15, 23, 42, 0.35);
+    z-index: 98;
+    animation: fadeIn 0.2s ease-out;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 .drawer {
     position: fixed; right: 0; top: 0; bottom: 0;
     width: 560px; max-width: 92vw;
