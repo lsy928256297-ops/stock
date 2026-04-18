@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI HR 面试助手</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
+</head>
+<body>
+    <header class="app-header">
+        <div class="brand">
+            <div class="logo">HR</div>
+            <div>
+                <h1>AI HR · 智能面试工作台</h1>
+                <p class="subtitle">
+                    JD · 简历 · 关注事项 · AI 生成面试题 · 面试记录 AI 复盘与评分
+                </p>
+            </div>
+        </div>
+        <div class="meta">
+            <span class="tag {% if api_key_set %}ok{% else %}warn{% endif %}">
+                {% if api_key_set %}API Key 已配置{% else %}未配置 API Key{% endif %}
+            </span>
+            <span class="tag">Model: {{ model }}</span>
+        </div>
+    </header>
+
+    <section class="toolbar">
+        <button id="btn-add-row" class="btn primary">+ 新增一行候选人</button>
+        <label class="btn secondary">
+            批量导入简历（可多选）
+            <input id="bulk-upload" type="file" multiple hidden
+                   accept=".pdf,.docx,.txt,.md" />
+        </label>
+        <div class="bulk-defaults">
+            <input id="bulk-jd" class="compact" placeholder="（可选）批量导入时默认 JD" />
+            <input id="bulk-focus" class="compact" placeholder="（可选）批量默认关注事项" />
+        </div>
+        <button id="btn-refresh" class="btn ghost">刷新</button>
+        <span id="bulk-status" class="status-hint"></span>
+    </section>
+
+    <main>
+        <div class="table-wrapper">
+            <table class="grid" id="grid">
+                <colgroup>
+                    <col style="width: 48px" />
+                    <col style="width: 18%" />
+                    <col style="width: 18%" />
+                    <col style="width: 14%" />
+                    <col style="width: 22%" />
+                    <col style="width: 14%" />
+                    <col style="width: 14%" />
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>① 岗位需求（JD）</th>
+                        <th>② 候选人简历</th>
+                        <th>③ 关注事项</th>
+                        <th>④ AI 生成面试问题</th>
+                        <th>⑤ 面试记录</th>
+                        <th>⑥ AI 分析 · 打分</th>
+                    </tr>
+                </thead>
+                <tbody id="grid-body">
+                    <!-- rows injected by JS -->
+                </tbody>
+            </table>
+            <div id="empty-state" class="empty-state" hidden>
+                暂无候选人。点击左上角 <b>「+ 新增一行候选人」</b> 或 <b>「批量导入简历」</b> 开始。
+            </div>
+        </div>
+    </main>
+
+    <!-- 详情抽屉 -->
+    <aside class="drawer" id="drawer" hidden>
+        <div class="drawer-header">
+            <h2 id="drawer-title">详情</h2>
+            <button class="btn ghost" id="drawer-close">关闭</button>
+        </div>
+        <div class="drawer-body" id="drawer-body"></div>
+    </aside>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        window.AI_HR_META = {
+            model: {{ model | tojson }},
+            api_base: {{ api_base | tojson }},
+            api_key_set: {{ api_key_set | tojson }}
+        };
+    </script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
