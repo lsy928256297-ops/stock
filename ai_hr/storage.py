@@ -3,6 +3,7 @@
 数据结构（单行 = 一位候选人）:
 {
   "id": "uuid",
+  "owner": <user_id|null>,         # 多用户模式下每行归属某用户；null 表示旧数据
   "created_at": "ISO8601",
   "updated_at": "ISO8601",
   "job_desc": "...",
@@ -52,22 +53,31 @@ def _save_all(rows: List[Dict]) -> None:
     os.replace(tmp, config.DATA_FILE)
 
 
-def list_rows() -> List[Dict]:
+def _matches_owner(row: Dict, owner: Optional[int]) -> bool:
+    """owner=None 表示不过滤（单机模式 / 兼容老数据）。"""
+    if owner is None:
+        return True
+    return row.get("owner") == owner
+
+
+def list_rows(owner: Optional[int] = None) -> List[Dict]:
     with _LOCK:
-        return _load_all()
+        rows = _load_all()
+    return [r for r in rows if _matches_owner(r, owner)]
 
 
-def get_row(row_id: str) -> Optional[Dict]:
+def get_row(row_id: str, owner: Optional[int] = None) -> Optional[Dict]:
     with _LOCK:
         for row in _load_all():
-            if row.get("id") == row_id:
+            if row.get("id") == row_id and _matches_owner(row, owner):
                 return row
     return None
 
 
-def create_row(**fields) -> Dict:
+def create_row(owner: Optional[int] = None, **fields) -> Dict:
     row = {
         "id": str(uuid.uuid4()),
+        "owner": owner,
         "created_at": _now(),
         "updated_at": _now(),
         "job_desc": "",
@@ -86,11 +96,11 @@ def create_row(**fields) -> Dict:
     return row
 
 
-def update_row(row_id: str, **fields) -> Optional[Dict]:
+def update_row(row_id: str, owner: Optional[int] = None, **fields) -> Optional[Dict]:
     with _LOCK:
         rows = _load_all()
         for row in rows:
-            if row.get("id") == row_id:
+            if row.get("id") == row_id and _matches_owner(row, owner):
                 for k, v in fields.items():
                     if v is not None:
                         row[k] = v
@@ -100,10 +110,13 @@ def update_row(row_id: str, **fields) -> Optional[Dict]:
     return None
 
 
-def delete_row(row_id: str) -> bool:
+def delete_row(row_id: str, owner: Optional[int] = None) -> bool:
     with _LOCK:
         rows = _load_all()
-        new_rows = [r for r in rows if r.get("id") != row_id]
+        new_rows = [
+            r for r in rows
+            if not (r.get("id") == row_id and _matches_owner(r, owner))
+        ]
         if len(new_rows) == len(rows):
             return False
         _save_all(new_rows)

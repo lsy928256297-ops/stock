@@ -40,6 +40,10 @@
         const text = await res.text();
         let data = null;
         try { data = text ? JSON.parse(text) : null; } catch (_) { /* raw text */ }
+        if (res.status === 401) {
+            location.href = "/login?next=" + encodeURIComponent(location.pathname);
+            throw new Error("未登录，正在跳转...");
+        }
         if (!res.ok) {
             let msg =
                 (data && (data.error || data.message)) ||
@@ -654,6 +658,80 @@
         }
     }
 
+    async function onLogout() {
+        if (!confirm("确认退出登录？")) return;
+        try {
+            await fetchJSON("/api/auth/logout", { method: "POST" });
+        } catch (_) {}
+        location.href = "/login";
+    }
+
+    async function onOpenAdmin() {
+        const bg = el("div", { class: "modal-backdrop" });
+        const box = el("div", { class: "modal-box", style: "width:min(560px,92vw);max-height:80vh;" });
+        box.appendChild(el("div", { class: "modal-title", style: "color:var(--text);" }, "邀请码管理"));
+
+        const listDiv = el("div", { class: "modal-detail", style: "max-height:40vh;" }, "加载中...");
+        box.appendChild(listDiv);
+
+        const actions = el("div", { class: "modal-actions" });
+        const customInput = el("input", {
+            type: "text",
+            placeholder: "自定义邀请码（留空则随机生成）",
+            style: "flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;",
+        });
+        const genBtn = el("button", { class: "btn primary" }, "生成邀请码");
+        const closeBtn = el("button", { class: "btn ghost", onclick: () => bg.remove() }, "关闭");
+
+        const reloadList = async () => {
+            try {
+                const data = await fetchJSON("/api/admin/invites");
+                const items = data.invites || [];
+                if (!items.length) { listDiv.textContent = "（暂无邀请码）"; return; }
+                listDiv.innerHTML = "";
+                items.forEach((inv) => {
+                    const used = inv.used_by != null;
+                    const line = el("div", {
+                        style: "display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed #eee;",
+                    }, [
+                        el("code", {
+                            style: "font-size:13px;" + (used ? "color:#94a3b8;text-decoration:line-through;" : "color:#1f2937;font-weight:600;"),
+                        }, inv.code),
+                        el("span", {
+                            style: "font-size:11.5px;color:" + (used ? "#94a3b8" : "#10b981"),
+                        }, used ? `已使用 (user #${inv.used_by})` : "未使用"),
+                    ]);
+                    listDiv.appendChild(line);
+                });
+            } catch (e) {
+                listDiv.textContent = "加载失败: " + e.message;
+            }
+        };
+
+        genBtn.addEventListener("click", async () => {
+            try {
+                const data = await fetchJSON("/api/admin/invites", {
+                    method: "POST",
+                    body: { code: customInput.value.trim() || undefined },
+                });
+                toast(`邀请码已生成：${data.code}`, "ok");
+                customInput.value = "";
+                reloadList();
+            } catch (e) { toast("生成失败: " + e.message, "err"); }
+        });
+
+        actions.appendChild(customInput);
+        actions.appendChild(genBtn);
+        actions.appendChild(closeBtn);
+        box.appendChild(actions);
+
+        bg.appendChild(box);
+        bg.addEventListener("click", (e) => { if (e.target === bg) bg.remove(); });
+        document.body.appendChild(bg);
+
+        reloadList();
+    }
+
     async function onDiagnose() {
         const btn = $("#btn-diagnose");
         btn.disabled = true;
@@ -696,6 +774,11 @@
         $("#btn-add-row").addEventListener("click", onAddRow);
         $("#btn-refresh").addEventListener("click", load);
         $("#btn-diagnose").addEventListener("click", onDiagnose);
+
+        const btnLogout = $("#btn-logout");
+        if (btnLogout) btnLogout.addEventListener("click", onLogout);
+        const btnAdmin = $("#btn-admin");
+        if (btnAdmin) btnAdmin.addEventListener("click", onOpenAdmin);
         $("#bulk-upload").addEventListener("change", (ev) => {
             onBulkUpload(ev.target.files);
             ev.target.value = "";

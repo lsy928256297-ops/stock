@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>注册 · AI HR</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}" />
+</head>
+<body class="auth-page">
+    <div class="auth-card">
+        <div class="auth-brand">
+            <div class="logo">HR</div>
+            <h1>注册 AI HR 账号</h1>
+            <p>注册需要管理员提供的邀请码</p>
+        </div>
+        <form id="signup-form" class="auth-form">
+            <label>用户名 <span class="hint">3–32 位，字母/数字/_.-</span></label>
+            <input type="text" name="username" autocomplete="username" required minlength="3" maxlength="32" />
+            <label>密码 <span class="hint">至少 6 位</span></label>
+            <input type="password" name="password" autocomplete="new-password" required minlength="6" />
+            <label>邀请码</label>
+            <input type="text" name="invite_code" required />
+            <button type="submit" class="btn primary">注册并登录</button>
+            <div id="err" class="auth-err" hidden></div>
+        </form>
+        <div class="auth-footer">
+            已有账号？<a href="{{ url_for('login_page') }}">去登录</a>
+        </div>
+    </div>
+    <script>
+        const form = document.getElementById("signup-form");
+        const err = document.getElementById("err");
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            err.hidden = true;
+            const fd = new FormData(form);
+            const res = await fetch("/api/auth/signup", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    username: fd.get("username"),
+                    password: fd.get("password"),
+                    invite_code: fd.get("invite_code"),
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                location.href = "/";
+            } else {
+                err.textContent = data.error || ("注册失败 " + res.status);
+                err.hidden = false;
+            }
+        });
+    </script>
+</body>
+</html>

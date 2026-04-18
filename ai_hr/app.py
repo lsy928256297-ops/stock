@@ -15,7 +15,9 @@ import sys
 import time
 import traceback
 
-from flask import Flask, jsonify, render_template, request
+from datetime import timedelta
+
+from flask import Flask, jsonify, redirect, render_template, request, url_for
 from werkzeug.utils import secure_filename
 
 logging.basicConfig(
@@ -27,9 +29,9 @@ log = logging.getLogger("ai_hr")
 
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from ai_hr import ai_client, config, prompts, resume_parser, storage  # type: ignore
+    from ai_hr import ai_client, auth, config, prompts, resume_parser, storage  # type: ignore
 else:
-    from . import ai_client, config, prompts, resume_parser, storage
+    from . import ai_client, auth, config, prompts, resume_parser, storage
 
 
 def create_app() -> Flask:
@@ -39,33 +41,136 @@ def create_app() -> Flask:
         static_folder=os.path.join(config.BASE_DIR, "static"),
     )
     app.config["MAX_CONTENT_LENGTH"] = config.MAX_CONTENT_LENGTH
+    app.secret_key = os.environ.get("AI_HR_SECRET_KEY") or os.urandom(32)
+    app.permanent_session_lifetime = timedelta(days=30)
+    # HTTPS / 反向代理部署时，由前端反代设置 Secure cookie
+    if os.environ.get("AI_HR_COOKIE_SECURE", "").lower() in ("1", "true", "yes"):
+        app.config.update(SESSION_COOKIE_SECURE=True)
+    app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+
+    auth.init_db()
+
+    def _current_user_id():
+        """返回当前登录用户的 id；未登录时抛 401 / 重定向。"""
+        user = auth.current_user()
+        return user["id"] if user else None
 
     # ---------------- 页面 ----------------
     @app.route("/")
     def index():
+        user = auth.current_user()
+        if not user:
+            return redirect(url_for("login_page"))
         return render_template(
             "index.html",
             model=config.MODEL,
             api_base=config.API_BASE,
             api_key_set=bool(config.API_KEY),
+            current_user=user,
+            is_admin=auth.is_admin(user["username"]),
         )
+
+    @app.route("/login", methods=["GET"])
+    def login_page():
+        if auth.current_user():
+            return redirect(url_for("index"))
+        return render_template("login.html", disable_signup=auth.DISABLE_SIGNUP)
+
+    @app.route("/signup", methods=["GET"])
+    def signup_page():
+        if auth.current_user():
+            return redirect(url_for("index"))
+        if auth.DISABLE_SIGNUP:
+            return redirect(url_for("login_page"))
+        return render_template("signup.html")
+
+    @app.post("/api/auth/login")
+    def api_login():
+        data = request.get_json(silent=True) or {}
+        user = auth.authenticate(data.get("username", ""), data.get("password", ""))
+        if not user:
+            return jsonify({"error": "用户名或密码错误"}), 401
+        auth.login_user(user)
+        return jsonify({
+            "username": user["username"],
+            "is_admin": auth.is_admin(user["username"]),
+        })
+
+    @app.post("/api/auth/signup")
+    def api_signup():
+        if auth.DISABLE_SIGNUP:
+            return jsonify({"error": "注册已关闭，请联系管理员获取邀请码"}), 403
+        data = request.get_json(silent=True) or {}
+        try:
+            user = auth.create_user(
+                data.get("username", ""),
+                data.get("password", ""),
+                data.get("invite_code", ""),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        auth.login_user(user)
+        return jsonify({
+            "username": user["username"],
+            "is_admin": auth.is_admin(user["username"]),
+        })
+
+    @app.post("/api/auth/logout")
+    def api_logout():
+        auth.logout_user()
+        return jsonify({"ok": True})
+
+    @app.get("/api/auth/me")
+    def api_me():
+        user = auth.current_user()
+        if not user:
+            return jsonify({"authenticated": False}), 200
+        return jsonify({
+            "authenticated": True,
+            "username": user["username"],
+            "is_admin": auth.is_admin(user["username"]),
+        })
+
+    # ------- 管理员：邀请码 -------
+    @app.get("/api/admin/invites")
+    @auth.admin_required
+    def api_list_invites():
+        return jsonify({"invites": auth.list_invites()})
+
+    @app.post("/api/admin/invites")
+    @auth.admin_required
+    def api_create_invite():
+        data = request.get_json(silent=True) or {}
+        code = (data.get("code") or "").strip() or None
+        try:
+            new_code = auth.create_invite(code)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"code": new_code})
 
     # ---------------- 行（候选人）CRUD ----------------
     @app.get("/api/rows")
+    @auth.login_required
     def api_list_rows():
-        return jsonify({"rows": storage.list_rows()})
+        uid = _current_user_id()
+        return jsonify({"rows": storage.list_rows(owner=uid)})
 
     @app.post("/api/rows")
+    @auth.login_required
     def api_create_row():
+        uid = _current_user_id()
         data = request.get_json(silent=True) or {}
         row = storage.create_row(
+            owner=uid,
             job_desc=data.get("job_desc", ""),
             focus_points=data.get("focus_points", ""),
         )
         return jsonify(row)
 
     @app.put("/api/rows/<row_id>")
+    @auth.login_required
     def api_update_row(row_id: str):
+        uid = _current_user_id()
         data = request.get_json(silent=True) or {}
         allowed = {
             "job_desc",
@@ -76,22 +181,26 @@ def create_app() -> Flask:
             "resume_filename",
         }
         fields = {k: v for k, v in data.items() if k in allowed}
-        row = storage.update_row(row_id, **fields)
+        row = storage.update_row(row_id, owner=uid, **fields)
         if not row:
             return jsonify({"error": "row not found"}), 404
         return jsonify(row)
 
     @app.delete("/api/rows/<row_id>")
+    @auth.login_required
     def api_delete_row(row_id: str):
-        ok = storage.delete_row(row_id)
+        uid = _current_user_id()
+        ok = storage.delete_row(row_id, owner=uid)
         if not ok:
             return jsonify({"error": "row not found"}), 404
         return jsonify({"ok": True})
 
     # ---------------- 简历上传 ----------------
     @app.post("/api/rows/<row_id>/resume")
+    @auth.login_required
     def api_upload_resume(row_id: str):
-        row = storage.get_row(row_id)
+        uid = _current_user_id()
+        row = storage.get_row(row_id, owner=uid)
         if not row:
             return jsonify({"error": "row not found"}), 404
         if "file" not in request.files:
@@ -122,13 +231,15 @@ def create_app() -> Flask:
         except OSError:
             pass
         updated = storage.update_row(
-            row_id, resume_filename=filename, resume_text=text
+            row_id, owner=uid, resume_filename=filename, resume_text=text
         )
         return jsonify(updated)
 
     @app.post("/api/rows/bulk_resume")
+    @auth.login_required
     def api_bulk_upload_resumes():
         """一次上传多份简历：每份自动创建一行。可附带默认 job_desc / focus_points。"""
+        uid = _current_user_id()
         job_desc = request.form.get("job_desc", "")
         focus_points = request.form.get("focus_points", "")
         files = request.files.getlist("files")
@@ -153,6 +264,7 @@ def create_app() -> Flask:
                 errors.append({"file": original_name, "error": str(exc)})
                 continue
             row = storage.create_row(
+                owner=uid,
                 job_desc=job_desc,
                 focus_points=focus_points,
                 resume_filename=original_name,
@@ -170,8 +282,10 @@ def create_app() -> Flask:
 
     # ---------------- AI 生成：面试问题 ----------------
     @app.post("/api/rows/<row_id>/generate_questions")
+    @auth.login_required
     def api_generate_questions(row_id: str):
-        row = storage.get_row(row_id)
+        uid = _current_user_id()
+        row = storage.get_row(row_id, owner=uid)
         if not row:
             return jsonify({"error": "row not found"}), 404
         messages = prompts.build_questions_messages(
@@ -193,13 +307,15 @@ def create_app() -> Flask:
             log.error("generate_questions failed in %.1fs: %s", time.time() - t0, exc)
             return jsonify({"error": str(exc)}), 502
         log.info("generate_questions ok in %.1fs, output_len=%d", time.time() - t0, len(text or ""))
-        updated = storage.update_row(row_id, questions_md=text)
+        updated = storage.update_row(row_id, owner=uid, questions_md=text)
         return jsonify(updated)
 
     # ---------------- AI 分析：面试记录 ----------------
     @app.post("/api/rows/<row_id>/analyze")
+    @auth.login_required
     def api_analyze(row_id: str):
-        row = storage.get_row(row_id)
+        uid = _current_user_id()
+        row = storage.get_row(row_id, owner=uid)
         if not row:
             return jsonify({"error": "row not found"}), 404
         notes = (row.get("interview_notes") or "").strip()
@@ -285,7 +401,7 @@ def create_app() -> Flask:
             }), 502
 
         parsed["_raw"] = text
-        updated = storage.update_row(row_id, analysis=parsed)
+        updated = storage.update_row(row_id, owner=uid, analysis=parsed)
         return jsonify(updated)
 
     # ---------------- 元信息 ----------------
@@ -301,6 +417,7 @@ def create_app() -> Flask:
         })
 
     @app.get("/api/diagnose")
+    @auth.login_required
     def api_diagnose():
         """一键自检：LLM 接口是否可用。"""
         result = ai_client.ping()

@@ -57,6 +57,16 @@ html, body {
 }
 .tag.ok { background: rgba(16,185,129,0.25); }
 .tag.warn { background: rgba(239,68,68,0.3); }
+.tag.user-tag { background: rgba(255,255,255,0.22); font-weight: 500; }
+.header-btn {
+    color: #fff; border-color: rgba(255,255,255,0.4);
+    background: rgba(255,255,255,0.08);
+    padding: 4px 10px; font-size: 12px;
+}
+.header-btn:hover {
+    background: rgba(255,255,255,0.18); color: #fff;
+    border-color: rgba(255,255,255,0.6);
+}
 
 .toolbar {
     display: flex; gap: 10px; align-items: center;

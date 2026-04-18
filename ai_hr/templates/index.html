@@ -22,6 +22,15 @@
                 {% if api_key_set %}API Key 已配置{% else %}未配置 API Key{% endif %}
             </span>
             <span class="tag">Model: {{ model }}</span>
+            {% if current_user %}
+            <span class="tag user-tag">
+                {% if is_admin %}👑 {% endif %}{{ current_user.username }}
+            </span>
+            {% if is_admin %}
+            <button id="btn-admin" class="btn ghost header-btn" title="管理邀请码">邀请码</button>
+            {% endif %}
+            <button id="btn-logout" class="btn ghost header-btn">退出</button>
+            {% endif %}
         </div>
     </header>
 

@@ -1,6 +1,10 @@
 # AI HR · 智能面试工作台
 
-一个轻量的 AI HR 助手 Web 应用，以 **表格（Spreadsheet）** 的形式同时处理多位候选人，每一行从左到右完成一次完整的面试闭环：
+一个轻量的 AI HR 助手 Web 应用，以 **表格（Spreadsheet）** 的形式同时处理多位候选人，每一行从左到右完成一次完整的面试闭环。
+
+> 想把它部署成网站给朋友一起用？请看 [DEPLOY.md](./DEPLOY.md)。
+
+## 能力
 
 | # | ① 岗位需求 JD | ② 候选人简历 | ③ 关注事项 | ④ AI 生成面试问题 | ⑤ 面试记录 | ⑥ AI 分析 · 打分 |
 |---|----|----|----|----|----|----|
@@ -11,7 +15,19 @@
 - **AI 面试记录复盘**：返回多维度评分、优劣势、风险、追问建议、综合打分与推荐结论。
 - **零数据库**：数据落地到本地 JSON 文件；上传的简历原文保留在 `uploads/` 目录下。
 
-## 1. 安装
+## 多用户支持
+
+本应用内置了完整的用户系统：
+
+- 用户名 + 密码登录，PBKDF2 加盐哈希
+- 邀请码注册：不开放匿名注册，只有你分发的邀请码才能创建账号
+- 管理员面板：指定用户登录后顶部会出现「邀请码」按钮，可生成/查看
+- 数据完全隔离：每位用户只能看到自己的数据
+- Session 有效期 30 天
+
+单机自用时直接 `python -m ai_hr.app`，用启动时环境变量里配置的邀请码注册第一个账号即可。生产部署请看 [DEPLOY.md](./DEPLOY.md)。
+
+## 1. 本地安装
 
 推荐 Python 3.10+。
 
@@ -44,21 +60,33 @@ export AI_HR_MODEL="gpt-4o-mini"
 ## 3. 启动
 
 ```bash
-# 方式一：模块方式（推荐）
-python -m ai_hr.app
+# 先设一个 session 密钥（随机字符串即可，避免重启后登录态失效）
+export AI_HR_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 
-# 方式二：直接运行
-cd ai_hr && python app.py
+# 注入首批邀请码（至少 1 个，用于注册第一个账号）
+export AI_HR_INVITE_CODES="INVITE001,INVITE002"
+
+# 把自己设为管理员（注册后生效）
+export AI_HR_ADMIN_USERS="admin"
+
+# 启动
+python -m ai_hr.app
 ```
 
-默认监听 `http://0.0.0.0:8765`。用浏览器打开即可。
+默认监听 `http://0.0.0.0:8765`。第一次打开会跳到 `/login`，点「注册」，用 `admin` 用户名和 `INVITE001` 创建账号。之后你就是管理员，可以在顶部「邀请码」按钮里生成更多邀请码给朋友。
 
 可通过环境变量自定义：
 
 - `PORT` / `HOST`：监听端口 / 地址
 - `AI_HR_UPLOAD_DIR`：简历原文存储目录
 - `AI_HR_DATA_FILE`：候选人数据 JSON 文件路径
+- `AI_HR_DB_FILE`：用户库（SQLite）路径
+- `AI_HR_SECRET_KEY`：session 加密密钥（生产环境必改）
+- `AI_HR_INVITE_CODES`：启动时注入的邀请码
+- `AI_HR_ADMIN_USERS`：管理员用户名列表（逗号分隔）
+- `AI_HR_DISABLE_SIGNUP`：设为 `1` 关闭注册
 - `AI_HR_MAX_MB`：单份简历最大大小（默认 16MB）
+- `AI_HR_TIMEOUT`：LLM 请求超时秒数（默认 600，Claude Opus 建议 1200）
 
 ## 4. 使用流程
 

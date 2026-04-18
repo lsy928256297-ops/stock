@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>登录 · AI HR</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}" />
+</head>
+<body class="auth-page">
+    <div class="auth-card">
+        <div class="auth-brand">
+            <div class="logo">HR</div>
+            <h1>AI HR · 智能面试工作台</h1>
+            <p>JD · 简历 · 关注事项 · 面试题 · 复盘与打分</p>
+        </div>
+        <form id="login-form" class="auth-form">
+            <label>用户名</label>
+            <input type="text" name="username" autocomplete="username" required />
+            <label>密码</label>
+            <input type="password" name="password" autocomplete="current-password" required />
+            <button type="submit" class="btn primary">登录</button>
+            <div id="err" class="auth-err" hidden></div>
+        </form>
+        {% if not disable_signup %}
+        <div class="auth-footer">
+            还没有账号？<a href="{{ url_for('signup_page') }}">注册一个</a>（需要邀请码）
+        </div>
+        {% else %}
+        <div class="auth-footer muted">
+            注册已关闭，请联系管理员获取账号。
+        </div>
+        {% endif %}
+    </div>
+    <script>
+        const form = document.getElementById("login-form");
+        const err = document.getElementById("err");
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            err.hidden = true;
+            const fd = new FormData(form);
+            const res = await fetch("/api/auth/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    username: fd.get("username"),
+                    password: fd.get("password"),
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                const next = new URLSearchParams(location.search).get("next") || "/";
+                location.href = next;
+            } else {
+                err.textContent = data.error || ("登录失败 " + res.status);
+                err.hidden = false;
+            }
+        });
+    </script>
+</body>
+</html>
