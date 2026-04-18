@@ -9,12 +9,21 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
+import time
 import traceback
 
 from flask import Flask, jsonify, render_template, request
 from werkzeug.utils import secure_filename
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)s %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger("ai_hr")
 
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -164,10 +173,20 @@ def create_app() -> Flask:
             row.get("resume_text", ""),
             row.get("focus_points", ""),
         )
+        log.info(
+            "generate_questions row=%s model=%s api_base=%s jd_len=%d resume_len=%d focus_len=%d",
+            row_id, config.MODEL, config.API_BASE,
+            len(row.get("job_desc") or ""),
+            len(row.get("resume_text") or ""),
+            len(row.get("focus_points") or ""),
+        )
+        t0 = time.time()
         try:
             text = ai_client.chat_completion(messages, temperature=0.5, max_tokens=3000)
         except ai_client.AIClientError as exc:
+            log.error("generate_questions failed in %.1fs: %s", time.time() - t0, exc)
             return jsonify({"error": str(exc)}), 502
+        log.info("generate_questions ok in %.1fs, output_len=%d", time.time() - t0, len(text or ""))
         updated = storage.update_row(row_id, questions_md=text)
         return jsonify(updated)
 
@@ -188,6 +207,11 @@ def create_app() -> Flask:
             row.get("questions_md", ""),
             notes,
         )
+        log.info(
+            "analyze row=%s model=%s notes_len=%d",
+            row_id, config.MODEL, len(notes),
+        )
+        t0 = time.time()
         try:
             text = ai_client.chat_completion(
                 messages,
@@ -196,7 +220,9 @@ def create_app() -> Flask:
                 response_format_json=True,
             )
         except ai_client.AIClientError as exc:
+            log.error("analyze failed in %.1fs: %s", time.time() - t0, exc)
             return jsonify({"error": str(exc)}), 502
+        log.info("analyze got response in %.1fs, len=%d", time.time() - t0, len(text or ""))
         parsed = ai_client.extract_json(text)
         if not parsed:
             return jsonify({

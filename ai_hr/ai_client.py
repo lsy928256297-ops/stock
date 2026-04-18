@@ -48,6 +48,17 @@ def chat_completion(
         resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
     except requests.RequestException as exc:
         raise AIClientError(f"调用 LLM 网络错误: {exc}") from exc
+
+    # 某些代理/模型（例如部分 Claude 走 openai 兼容层）不支持 response_format，
+    # 收到 400/422 时自动去掉该字段再重试一次。
+    if response_format_json and resp.status_code in (400, 415, 422):
+        err_text = (resp.text or "")[:500].lower()
+        if "response_format" in err_text or "unsupported" in err_text or "invalid" in err_text:
+            payload.pop("response_format", None)
+            try:
+                resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+            except requests.RequestException as exc:
+                raise AIClientError(f"调用 LLM 网络错误: {exc}") from exc
     ctype = (resp.headers.get("Content-Type") or "").lower()
     body_preview = (resp.text or "")[:300].strip()
 

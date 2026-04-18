@@ -31,12 +31,24 @@
             init.headers["Content-Type"] = "application/json";
             init.body = JSON.stringify(opts.body);
         }
-        const res = await fetch(url, init);
+        let res;
+        try {
+            res = await fetch(url, init);
+        } catch (netErr) {
+            throw new Error(`网络错误（服务是否已停止？）: ${netErr.message}`);
+        }
+        const text = await res.text();
         let data = null;
-        try { data = await res.json(); } catch (_) { /* ignore */ }
+        try { data = text ? JSON.parse(text) : null; } catch (_) { /* raw text */ }
         if (!res.ok) {
-            const msg = (data && data.error) || `HTTP ${res.status}`;
-            throw new Error(msg);
+            const msg =
+                (data && (data.error || data.message)) ||
+                (text && text.slice(0, 500)) ||
+                `HTTP ${res.status}`;
+            const err = new Error(msg);
+            err.status = res.status;
+            err.raw = text;
+            throw err;
         }
         return data;
     }
@@ -67,7 +79,31 @@
         t.textContent = msg;
         t.className = `toast show ${kind}`;
         clearTimeout(toast._h);
-        toast._h = setTimeout(() => { t.className = "toast"; }, 3000);
+        const dur = kind === "err" ? 9000 : 3000;
+        toast._h = setTimeout(() => { t.className = "toast"; }, dur);
+    }
+
+    function errorModal(title, detail) {
+        const bg = el("div", { class: "modal-backdrop" });
+        const box = el("div", { class: "modal-box" }, [
+            el("div", { class: "modal-title" }, title),
+            el("pre", { class: "modal-detail" }, String(detail || "")),
+            el("div", { class: "modal-actions" }, [
+                el("button", {
+                    class: "btn ghost",
+                    onclick: async () => {
+                        try { await navigator.clipboard.writeText(String(detail || "")); toast("已复制错误详情", "ok"); } catch (_) {}
+                    },
+                }, "复制详情"),
+                el("button", {
+                    class: "btn primary",
+                    onclick: () => bg.remove(),
+                }, "我知道了"),
+            ]),
+        ]);
+        bg.appendChild(box);
+        bg.addEventListener("click", (e) => { if (e.target === bg) bg.remove(); });
+        document.body.appendChild(bg);
     }
 
     function debounce(fn, ms = 600) {
@@ -223,9 +259,10 @@
                 render();
                 toast("简历解析成功", "ok");
             } catch (e) {
-                toast("上传失败: " + e.message, "err");
+                errorModal("简历上传 / 解析失败 — " + file.name, e.message);
             } finally {
                 fileLabel.classList.remove("btn-generating");
+                input.value = "";
             }
         });
         fileLabel.appendChild(input);
@@ -254,20 +291,24 @@
 
         const genBtn = el("button", { class: "btn primary small" }, "生成面试问题");
         genBtn.addEventListener("click", async () => {
+            if (genBtn.disabled) return;
             genBtn.disabled = true;
             genBtn.classList.add("btn-generating");
-            const sp = el("span", { class: "spinner" });
-            genBtn.prepend(sp);
+            genBtn.textContent = "";
+            genBtn.appendChild(el("span", { class: "spinner" }));
+            genBtn.appendChild(document.createTextNode(" 生成中..."));
+            toast("AI 生成中，通常 10-30 秒，请勿刷新页面", "");
             try {
                 const updated = await api.genQuestions(row.id);
                 Object.assign(row, updated);
                 render();
                 toast("已生成面试问题", "ok");
             } catch (e) {
-                toast("生成失败: " + e.message, "err");
+                errorModal("生成面试问题失败", e.message);
             } finally {
                 genBtn.disabled = false;
                 genBtn.classList.remove("btn-generating");
+                genBtn.textContent = "生成面试问题";
             }
         });
 
@@ -303,23 +344,28 @@
 
         const analyzeBtn = el("button", { class: "btn primary small" }, "AI 分析 + 打分");
         analyzeBtn.addEventListener("click", async () => {
+            if (analyzeBtn.disabled) return;
             if (!(row.interview_notes || "").trim()) {
                 toast("请先在「面试记录」列填写内容", "err");
                 return;
             }
             analyzeBtn.disabled = true;
             analyzeBtn.classList.add("btn-generating");
-            analyzeBtn.prepend(el("span", { class: "spinner" }));
+            analyzeBtn.textContent = "";
+            analyzeBtn.appendChild(el("span", { class: "spinner" }));
+            analyzeBtn.appendChild(document.createTextNode(" 分析中..."));
+            toast("AI 分析中，通常 15-40 秒，请勿刷新页面", "");
             try {
                 const updated = await api.analyze(row.id);
                 Object.assign(row, updated);
                 render();
                 toast("已完成面试分析", "ok");
             } catch (e) {
-                toast("分析失败: " + e.message, "err");
+                errorModal("AI 分析失败", e.message);
             } finally {
                 analyzeBtn.disabled = false;
                 analyzeBtn.classList.remove("btn-generating");
+                analyzeBtn.textContent = "AI 分析 + 打分";
             }
         });
 
@@ -589,6 +635,9 @@
         document.addEventListener("keydown", (ev) => {
             if (ev.key === "Escape" && !$("#drawer").hidden) closeDrawer();
         });
+
+        const toastEl = $("#toast");
+        if (toastEl) toastEl.addEventListener("click", () => toastEl.classList.remove("show"));
 
         if (!window.AI_HR_META.api_key_set) {
             toast("尚未设置 AI_HR_API_KEY，AI 生成功能将不可用。请参考 README 配置。", "err");
