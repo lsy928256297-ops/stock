@@ -6,14 +6,44 @@ import os
 from typing import Union
 
 
-def _extract_pdf(raw: bytes) -> str:
-    try:
-        from pdfminer.high_level import extract_text  # type: ignore
-    except Exception as exc:  # pragma: no cover
-        raise RuntimeError(
-            "未安装 pdfminer.six，无法解析 PDF；请先 pip install pdfminer.six"
-        ) from exc
+def _extract_pdf_pdfminer(raw: bytes) -> str:
+    from pdfminer.high_level import extract_text  # type: ignore
     return extract_text(io.BytesIO(raw)) or ""
+
+
+def _extract_pdf_pypdf(raw: bytes) -> str:
+    try:
+        from pypdf import PdfReader  # type: ignore
+    except ImportError:
+        from PyPDF2 import PdfReader  # type: ignore
+    reader = PdfReader(io.BytesIO(raw))
+    parts = []
+    for page in reader.pages:
+        try:
+            parts.append(page.extract_text() or "")
+        except Exception:
+            continue
+    return "\n".join(parts)
+
+
+def _extract_pdf(raw: bytes) -> str:
+    """PDF 解析：优先 pdfminer.six，失败则回退到 pypdf。两者都失败时抛详细错误。"""
+    errors = []
+    for name, fn in (("pdfminer", _extract_pdf_pdfminer), ("pypdf", _extract_pdf_pypdf)):
+        try:
+            text = fn(raw)
+            if text and text.strip():
+                return text
+            errors.append(f"{name}: 解析结果为空")
+        except ImportError as exc:
+            errors.append(f"{name}: 未安装（{exc}）")
+        except Exception as exc:
+            errors.append(f"{name}: {type(exc).__name__}: {exc}")
+    raise RuntimeError(
+        "PDF 解析失败："
+        + "; ".join(errors)
+        + "。若是扫描版或加密 PDF，请先用 WPS/Adobe 另存为可选中文字的 PDF，或直接导出为 DOCX/TXT 后再上传。"
+    )
 
 
 def _extract_docx(raw: bytes) -> str:
@@ -57,5 +87,8 @@ def extract_resume_text(filename: str, raw: Union[bytes, bytearray]) -> str:
         raise ValueError(f"不支持的文件类型: .{ext}")
     text = (text or "").strip()
     if not text:
-        raise ValueError("简历内容为空或无法解析")
+        raise ValueError(
+            "简历内容为空或无法解析。若是扫描件 PDF（全是图片），需要先做 OCR；"
+            "也可改用 WPS/Adobe 将 PDF 另存为 DOCX 或 TXT 后再上传。"
+        )
     return text

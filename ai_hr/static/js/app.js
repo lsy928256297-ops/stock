@@ -529,6 +529,33 @@
         }
     }
 
+    async function onDiagnose() {
+        const btn = $("#btn-diagnose");
+        btn.disabled = true;
+        const old = btn.textContent;
+        btn.textContent = "检测中...";
+        try {
+            const res = await fetchJSON("/api/diagnose");
+            if (res.ok) {
+                toast(`✓ LLM 连通正常 · model=${res.model}`, "ok");
+            } else {
+                alert(
+                    "LLM 连通性检测失败：\n\n" +
+                    `stage: ${res.stage || "-"}\n` +
+                    `model: ${res.model}\n` +
+                    `api_base: ${res.api_base}\n` +
+                    `api_key_set: ${res.api_key_set}\n\n` +
+                    `详情:\n${res.detail}`
+                );
+            }
+        } catch (e) {
+            toast("自检失败: " + e.message, "err");
+        } finally {
+            btn.disabled = false;
+            btn.textContent = old;
+        }
+    }
+
     async function load() {
         try {
             const data = await api.list();
@@ -543,6 +570,7 @@
     document.addEventListener("DOMContentLoaded", () => {
         $("#btn-add-row").addEventListener("click", onAddRow);
         $("#btn-refresh").addEventListener("click", load);
+        $("#btn-diagnose").addEventListener("click", onDiagnose);
         $("#bulk-upload").addEventListener("change", (ev) => {
             onBulkUpload(ev.target.files);
             ev.target.value = "";

@@ -218,6 +218,15 @@ def create_app() -> Flask:
             "max_mb": config.MAX_CONTENT_MB,
         })
 
+    @app.get("/api/diagnose")
+    def api_diagnose():
+        """一键自检：LLM 接口是否可用。"""
+        result = ai_client.ping()
+        result["model"] = config.MODEL
+        result["api_base"] = config.API_BASE
+        result["api_key_set"] = bool(config.API_KEY)
+        return jsonify(result)
+
     # ---------------- 错误处理 ----------------
     @app.errorhandler(413)
     def too_large(_):

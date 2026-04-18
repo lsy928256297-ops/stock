@@ -48,15 +48,78 @@ def chat_completion(
         resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
     except requests.RequestException as exc:
         raise AIClientError(f"调用 LLM 网络错误: {exc}") from exc
-    if resp.status_code != 200:
-        raise AIClientError(
-            f"LLM 接口返回 {resp.status_code}: {resp.text[:500]}"
+    ctype = (resp.headers.get("Content-Type") or "").lower()
+    body_preview = (resp.text or "")[:300].strip()
+
+    def _hint_html() -> str:
+        return (
+            f"LLM 返回的不是 JSON（Content-Type={ctype or 'unknown'}），疑似 AI_HR_API_BASE 配置错误。"
+            f"当前 API_BASE={config.API_BASE!r}，请确认：\n"
+            "  · OpenAI 官方       → https://api.openai.com/v1\n"
+            "  · DeepSeek          → https://api.deepseek.com/v1\n"
+            "  · 通义千问兼容      → https://dashscope.aliyuncs.com/compatible-mode/v1\n"
+            "  · Kimi              → https://api.moonshot.cn/v1\n"
+            "  · 火山方舟（豆包）  → https://ark.cn-beijing.volces.com/api/v3\n"
+            "  · 本地 Ollama       → http://localhost:11434/v1\n"
+            f"原始响应前 300 字：{body_preview!r}"
         )
+
+    looks_like_html = (
+        "text/html" in ctype
+        or body_preview.lower().startswith("<!doctype")
+        or body_preview.lower().startswith("<html")
+    )
+
+    if resp.status_code != 200:
+        if looks_like_html:
+            raise AIClientError(f"HTTP {resp.status_code}。{_hint_html()}")
+        raise AIClientError(
+            f"LLM 接口返回 HTTP {resp.status_code}，原文：{body_preview!r}"
+        )
+
+    if looks_like_html:
+        raise AIClientError(_hint_html())
+
     try:
         data = resp.json()
+    except ValueError as exc:
+        raise AIClientError(
+            f"LLM 响应不是有效 JSON（Content-Type={ctype or 'unknown'}），"
+            f"原文：{body_preview!r}"
+        ) from exc
+
+    if not isinstance(data, dict) or "choices" not in data:
+        err = data.get("error") if isinstance(data, dict) else None
+        if err:
+            raise AIClientError(f"LLM 接口返回错误：{err}")
+        raise AIClientError(
+            f"LLM 响应结构异常（缺少 choices 字段），原文：{json.dumps(data, ensure_ascii=False)[:300]!r}"
+        )
+
+    try:
         return data["choices"][0]["message"]["content"]
-    except (KeyError, ValueError, TypeError) as exc:
-        raise AIClientError(f"解析 LLM 响应失败: {exc}; 原文: {resp.text[:300]}") from exc
+    except (KeyError, IndexError, TypeError) as exc:
+        raise AIClientError(
+            f"解析 LLM 响应失败: {exc}; 原文：{json.dumps(data, ensure_ascii=False)[:300]!r}"
+        ) from exc
+
+
+def ping() -> Dict:
+    """用最小请求探测 LLM 接口连通性，返回 {ok, detail}。"""
+    try:
+        _require_api_key()
+    except AIClientError as exc:
+        return {"ok": False, "stage": "config", "detail": str(exc)}
+    try:
+        text = chat_completion(
+            [{"role": "user", "content": "ping"}],
+            temperature=0.0,
+            max_tokens=16,
+            timeout=30,
+        )
+        return {"ok": True, "detail": (text or "")[:120]}
+    except AIClientError as exc:
+        return {"ok": False, "stage": "chat", "detail": str(exc)}
 
 
 def extract_json(text: str) -> Optional[Dict]:

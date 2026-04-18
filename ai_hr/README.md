@@ -115,7 +115,42 @@ ai_hr/
 | `POST` | `/api/rows/<id>/analyze` | 分析面试记录并打分 |
 | `GET`  | `/api/meta` | 当前模型 / API Base / API Key 状态 |
 
-## 7. 安全与隐私
+## 7. 常见报错排查
+
+### ① `解析 LLM 响应失败 ... 原文: <!doctype html>...`
+
+LLM 接口返回的是 HTML 页面而不是 JSON，**几乎一定是 `AI_HR_API_BASE` 配错了**（路径不对、少了 `/v1`、域名错）。
+
+- 页面右上角点 **「连通性自检」** 按钮，或直接访问 `http://localhost:8765/api/diagnose` 查看详细错误。
+- 正确的 base URL：
+  - OpenAI 官方：`https://api.openai.com/v1`
+  - DeepSeek：`https://api.deepseek.com/v1`
+  - 通义千问兼容模式：`https://dashscope.aliyuncs.com/compatible-mode/v1`
+  - Kimi：`https://api.moonshot.cn/v1`
+  - 火山方舟（豆包）：`https://ark.cn-beijing.volces.com/api/v3`
+  - router.ss.chat / oneapi 之类的聚合代理：**通常要带 `/v1`**，请看服务商文档
+  - 本地 Ollama：`http://localhost:11434/v1`
+- 用 curl 最快验证：
+  ```bash
+  curl -sS -X POST "$AI_HR_API_BASE/chat/completions" \
+    -H "Authorization: Bearer $AI_HR_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{\"model\":\"$AI_HR_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":20}"
+  ```
+  看到 `{"choices":[{...}]}` 即配置正确；看到 `<html>` 说明 base 错；看到 `{"error":...}` 按错误信息处理。
+
+### ② 上传 PDF 偶尔解析失败
+
+- 已内置两套解析器：先用 `pdfminer.six`，失败再用 `pypdf` 兜底。
+- 扫描版 PDF（整页都是图片）任何非 OCR 解析都会失败，请先用 WPS / Adobe 做 OCR，或直接导出为 DOCX / TXT 再上传。
+- 加密 PDF 需先移除密码保护。
+- 旧版 `.doc` 不支持，另存为 `.docx` 即可。
+
+### ③ 点按钮报 `未设置 AI_HR_API_KEY`
+
+环境变量未在 **启动 Flask 的那个终端** 里设置。重新 `export` 之后再 `python -m ai_hr.app` 启动。
+
+## 8. 安全与隐私
 
 - 所有简历与面试记录均 **仅存储于本地**。若你的部署环境共享，请务必做好访问控制。
 - AI 分析会把 JD、简历原文、关注事项、面试记录发送给你配置的 LLM。请在敏感场景下自建本地模型（Ollama / vLLM）。
