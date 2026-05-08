@@ -1,0 +1,35 @@
+services:
+  ai_hr:
+    build:
+      context: ..
+      dockerfile: ai_hr/Dockerfile
+    image: ai_hr:latest
+    container_name: ai_hr
+    restart: unless-stopped
+    ports:
+      - "${AI_HR_PORT:-8765}:8765"
+    environment:
+      # ====== 必填 ======
+      AI_HR_API_KEY: "${AI_HR_API_KEY}"
+      AI_HR_API_BASE: "${AI_HR_API_BASE:-https://api.openai.com/v1}"
+      AI_HR_MODEL: "${AI_HR_MODEL:-gpt-4o-mini}"
+      # ====== 安全 ======
+      # 固定一个随机字符串，避免重启后 session 失效 —— 务必改成你自己的！
+      AI_HR_SECRET_KEY: "${AI_HR_SECRET_KEY:-change-me-to-a-random-string}"
+      # 启动时注入的邀请码，逗号分隔；首次启动后已入库，后续可从页面增删
+      AI_HR_INVITE_CODES: "${AI_HR_INVITE_CODES:-}"
+      # 管理员用户名（逗号分隔），这些用户登录后可管理邀请码
+      AI_HR_ADMIN_USERS: "${AI_HR_ADMIN_USERS:-}"
+      # 关闭注册（只允许 AI_HR_ADMIN_USERS 手动创建账号）
+      AI_HR_DISABLE_SIGNUP: "${AI_HR_DISABLE_SIGNUP:-}"
+      # 生产部署走 HTTPS 时建议开
+      AI_HR_COOKIE_SECURE: "${AI_HR_COOKIE_SECURE:-}"
+      # LLM 超时（秒）。Claude Opus 等慢模型建议 1200
+      AI_HR_TIMEOUT: "${AI_HR_TIMEOUT:-600}"
+    volumes:
+      - ai_hr_data:/app/ai_hr/data
+      - ai_hr_uploads:/app/ai_hr/uploads
+
+volumes:
+  ai_hr_data:
+  ai_hr_uploads:
