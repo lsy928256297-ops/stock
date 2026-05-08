@@ -1,13 +1,18 @@
 """AI HR 使用的 prompt 模板。"""
 from __future__ import annotations
 
+import os
+
 # 简历/面试记录往往很长，这里统一做一个软性截断，避免 prompt 过长导致超时或成本飙升。
-MAX_FIELD_CHARS = 12000
+# 默认 4000 字符/字段（约 2k token，对中文友好）。某些代理（如 router.ss.chat）
+# 会对上下文长度做严格限制，可以通过 AI_HR_MAX_FIELD_CHARS 环境变量调小。
+DEFAULT_MAX_FIELD_CHARS = int(os.environ.get("AI_HR_MAX_FIELD_CHARS", "4000"))
 
 
-def _clip(text: str, n: int = MAX_FIELD_CHARS) -> str:
+def _clip(text: str, n: int = None) -> str:
     if not text:
         return text
+    n = n or DEFAULT_MAX_FIELD_CHARS
     if len(text) <= n:
         return text
     return text[:n] + f"\n...(超出 {len(text) - n} 字已截断)..."
@@ -26,18 +31,20 @@ SYSTEM_HR_JSON = (
 )
 
 
-def build_questions_messages(job_desc: str, resume_text: str, focus_points: str):
+def build_questions_messages(
+    job_desc: str, resume_text: str, focus_points: str, max_chars: int = None
+):
     """生成面试问题 + 考察事项 的 prompt。"""
     user = f"""请根据以下信息，为这位候选人设计一套结构化的面试提纲。
 
 【岗位需求 / JD】
-{_clip(job_desc) or '(未填写)'}
+{_clip(job_desc, max_chars) or '(未填写)'}
 
 【候选人简历】
-{_clip(resume_text) or '(未提供)'}
+{_clip(resume_text, max_chars) or '(未提供)'}
 
 【面试官的关注事项】
-{_clip(focus_points) or '(未填写)'}
+{_clip(focus_points, max_chars) or '(未填写)'}
 
 请按以下结构输出，使用 Markdown 分级标题与列表：
 1. **简历要点速览**：3-6 条，总结候选人的核心背景与亮点/疑点。
@@ -62,24 +69,25 @@ def build_analysis_messages(
     focus_points: str,
     interview_questions: str,
     interview_notes: str,
+    max_chars: int = None,
 ):
     """分析面试记录并给出反馈 + 打分 的 prompt。要求 JSON 输出。"""
     user = f"""请基于以下材料，对本次面试进行专业分析，并给出结构化评分与建议。
 
 【岗位需求 / JD】
-{_clip(job_desc) or '(未填写)'}
+{_clip(job_desc, max_chars) or '(未填写)'}
 
 【候选人简历摘要】
-{_clip(resume_text) or '(未提供)'}
+{_clip(resume_text, max_chars) or '(未提供)'}
 
 【面试官的关注事项】
-{_clip(focus_points) or '(未填写)'}
+{_clip(focus_points, max_chars) or '(未填写)'}
 
 【事先生成的面试问题与考察事项】
-{_clip(interview_questions) or '(未提供)'}
+{_clip(interview_questions, max_chars) or '(未提供)'}
 
 【本次的面试记录 / 纪要】
-{_clip(interview_notes) or '(未提供)'}
+{_clip(interview_notes, max_chars) or '(未提供)'}
 
 **评分原则（非常重要，必须严格遵守）**：
 - 评分只基于两件事：

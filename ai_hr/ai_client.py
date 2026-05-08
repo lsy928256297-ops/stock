@@ -92,6 +92,23 @@ def chat_completion(
     if resp.status_code != 200:
         if looks_like_html:
             raise AIClientError(f"HTTP {resp.status_code}。{_hint_html()}")
+        # 400 / 413 / 422 多半是上下文太长 / 参数不被支持，给针对性提示
+        if resp.status_code in (400, 413, 422):
+            low = body_preview.lower()
+            looks_like_overflow = (
+                "context" in low or "token" in low or "too long" in low or "exceed" in low
+                or "length" in low or "上下文" in body_preview or "过长" in body_preview
+                or "过大" in body_preview or "limit" in low
+            )
+            if looks_like_overflow:
+                raise AIClientError(
+                    f"LLM 拒绝请求（HTTP {resp.status_code}），疑似上下文过长。\n"
+                    "建议：\n"
+                    "  · 缩短 JD / 简历 / 面试记录长度（系统会自动重试缩短，仍失败说明字段过短也被拒绝）\n"
+                    "  · 设置 export AI_HR_MAX_FIELD_CHARS=2000 进一步压缩\n"
+                    "  · 换一家代理或上游模型（这家代理可能对单次请求长度有较小硬限）\n"
+                    f"原文：{body_preview!r}"
+                )
         raise AIClientError(
             f"LLM 接口返回 HTTP {resp.status_code}，原文：{body_preview!r}"
         )

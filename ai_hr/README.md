@@ -143,7 +143,43 @@ ai_hr/
 | `POST` | `/api/rows/<id>/analyze` | 分析面试记录并打分 |
 | `GET`  | `/api/meta` | 当前模型 / API Base / API Key 状态 |
 
-## 7. 常见报错排查
+## 7. 服务商兼容性提示
+
+不同 LLM 服务商对 OpenAI 兼容协议的实现差异很大，本应用已经做了多重兜底，但仍有一些实际场景需要注意：
+
+### router.ss.chat / Claude Code 类代理
+
+这类代理是为 **Claude Code 客户端** 设计的，对单次请求大小、参数有严格限制。常见症状：
+
+- 报错 `您的请求携带的一些参数似乎不正确，可能原则于...上下文过长`
+- HTTP 400 / 422 频繁出现
+
+应用已经做了**自动重试缩短上下文**（默认 → 2000 → 800 字符/字段），如果仍失败：
+
+```bash
+# 进一步压缩单字段长度
+export AI_HR_MAX_FIELD_CHARS=1500
+```
+
+或者换一家代理：
+
+| 推荐服务商 | API_BASE | 备注 |
+|------|------|------|
+| DeepSeek 官方 | `https://api.deepseek.com/v1` | 性价比高，速度快，对长上下文友好 |
+| OpenRouter | `https://openrouter.ai/api/v1` | 一个 Key 调全家桶，含 Claude / GPT / Llama 等 |
+| Kimi | `https://api.moonshot.cn/v1` | 国产，长上下文专长 |
+| 通义千问 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 国产，价格友好 |
+| 火山方舟（豆包） | `https://ark.cn-beijing.volces.com/api/v3` | 国产，速度快 |
+
+### Claude 模型对 JSON 格式遵从一般
+
+应用已经做了 **JSON 自动修复重试**，但首次成功率会比 GPT-4o / Sonnet 低。如果你主要做 ⑥ AI 分析+打分，推荐用：
+
+- `gpt-4o-mini`（性价比首选）
+- `claude-3-5-sonnet-20241022`（质量+JSON 都好）
+- `deepseek-chat`（国产首选）
+
+## 8. 常见报错排查
 
 ### ① `解析 LLM 响应失败 ... 原文: <!doctype html>...`
 
@@ -178,7 +214,7 @@ LLM 接口返回的是 HTML 页面而不是 JSON，**几乎一定是 `AI_HR_API_
 
 环境变量未在 **启动 Flask 的那个终端** 里设置。重新 `export` 之后再 `python -m ai_hr.app` 启动。
 
-## 8. 安全与隐私
+## 9. 安全与隐私
 
 - 所有简历与面试记录均 **仅存储于本地**。若你的部署环境共享，请务必做好访问控制。
 - AI 分析会把 JD、简历原文、关注事项、面试记录发送给你配置的 LLM。请在敏感场景下自建本地模型（Ollama / vLLM）。

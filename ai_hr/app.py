@@ -280,6 +280,33 @@ def create_app() -> Flask:
             created.append(row)
         return jsonify({"created": created, "errors": errors})
 
+    def _is_context_overflow(exc: Exception) -> bool:
+        """识别上下文过长 / 参数过大的常见错误。"""
+        s = str(exc).lower()
+        keys = [
+            "context length", "context_length", "too long", "tokens",
+            "上下文过长", "上下文超长", "上下文过大", "请求过大",
+            "max_tokens", "exceeds", "maximum", "limit",
+            "http 400", "http 413", "http 422",
+        ]
+        return any(k in s for k in keys)
+
+    def _call_llm_with_shrink(builder, *args, **kwargs):
+        """尝试调用 LLM；失败若是上下文/参数问题，自动把每个字段截短重试。"""
+        # 三个梯度：默认 → 2000 → 800
+        for attempt, max_chars in enumerate((None, 2000, 800)):
+            messages = builder(*args, max_chars=max_chars)
+            try:
+                return ai_client.chat_completion(messages, **kwargs), attempt
+            except ai_client.AIClientError as exc:
+                if attempt < 2 and _is_context_overflow(exc):
+                    log.warning(
+                        "LLM 调用失败（疑似上下文超限），尝试缩短到 %s 字/字段后重试: %s",
+                        max_chars or "默认", str(exc)[:200],
+                    )
+                    continue
+                raise
+
     # ---------------- AI 生成：面试问题 ----------------
     @app.post("/api/rows/<row_id>/generate_questions")
     @auth.login_required
@@ -288,11 +315,6 @@ def create_app() -> Flask:
         row = storage.get_row(row_id, owner=uid)
         if not row:
             return jsonify({"error": "row not found"}), 404
-        messages = prompts.build_questions_messages(
-            row.get("job_desc", ""),
-            row.get("resume_text", ""),
-            row.get("focus_points", ""),
-        )
         log.info(
             "generate_questions row=%s model=%s api_base=%s jd_len=%d resume_len=%d focus_len=%d",
             row_id, config.MODEL, config.API_BASE,
@@ -302,11 +324,21 @@ def create_app() -> Flask:
         )
         t0 = time.time()
         try:
-            text = ai_client.chat_completion(messages, temperature=0.5, max_tokens=3000)
+            text, attempt = _call_llm_with_shrink(
+                prompts.build_questions_messages,
+                row.get("job_desc", ""),
+                row.get("resume_text", ""),
+                row.get("focus_points", ""),
+                temperature=0.5,
+                max_tokens=2000,
+            )
         except ai_client.AIClientError as exc:
             log.error("generate_questions failed in %.1fs: %s", time.time() - t0, exc)
             return jsonify({"error": str(exc)}), 502
-        log.info("generate_questions ok in %.1fs, output_len=%d", time.time() - t0, len(text or ""))
+        log.info(
+            "generate_questions ok in %.1fs (attempt=%d), output_len=%d",
+            time.time() - t0, attempt, len(text or ""),
+        )
         updated = storage.update_row(row_id, owner=uid, questions_md=text)
         return jsonify(updated)
 
@@ -320,31 +352,28 @@ def create_app() -> Flask:
             return jsonify({"error": "row not found"}), 404
         notes = (row.get("interview_notes") or "").strip()
         if not notes:
-            # 允许前端在调用前先提交；若仍为空则直接报错
             return jsonify({"error": "请先填写面试记录后再分析"}), 400
-        messages = prompts.build_analysis_messages(
-            row.get("job_desc", ""),
-            row.get("resume_text", ""),
-            row.get("focus_points", ""),
-            row.get("questions_md", ""),
-            notes,
-        )
         log.info(
             "analyze row=%s model=%s notes_len=%d",
             row_id, config.MODEL, len(notes),
         )
         t0 = time.time()
         try:
-            text = ai_client.chat_completion(
-                messages,
+            text, attempt = _call_llm_with_shrink(
+                prompts.build_analysis_messages,
+                row.get("job_desc", ""),
+                row.get("resume_text", ""),
+                row.get("focus_points", ""),
+                row.get("questions_md", ""),
+                notes,
                 temperature=0.2,
-                max_tokens=3000,
+                max_tokens=2000,
                 response_format_json=True,
             )
         except ai_client.AIClientError as exc:
             log.error("analyze failed in %.1fs: %s", time.time() - t0, exc)
             return jsonify({"error": str(exc)}), 502
-        log.info("analyze got response in %.1fs, len=%d", time.time() - t0, len(text or ""))
+        log.info("analyze got response in %.1fs (attempt=%d), len=%d", time.time() - t0, attempt, len(text or ""))
         parsed = ai_client.extract_json(text)
 
         # 若首次未能提取到 JSON，做一次"修复式"重试：
